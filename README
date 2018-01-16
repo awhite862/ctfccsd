@@ -1,0 +1,20 @@
+1.
+git clone https://github.com/cyclops-community/ctf
+module add anaconda2/4.2.0
+module add mkl-2017.0.098
+module add gcc-5.4.0/openmpi-1.10.3
+module add python2.7/mpi4py-openmpi-1.10.3-gcc-5.4.0
+
+2.
+cd ctf
+mkdir build
+cd build
+
+3.
+run install.sh in build directory to generate config.mk.  If the generated
+config.mk does not work,  use the config.mk file in this folder.
+
+4.
+export LD_LIBRARY_PATH=/xxx/ctf/build/lib_shared:$LD_LIBRARY_PATH
+export PYTHONPATH=/xxx/ctf/build/lib_python:$PYTHONPATH
+
