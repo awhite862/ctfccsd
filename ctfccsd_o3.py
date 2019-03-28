@@ -10,6 +10,7 @@ import ctypes
 import tempfile
 from functools import reduce
 import numpy
+import sys
 
 from pyscf import gto
 from pyscf import lib
@@ -140,14 +141,15 @@ def update_amps(mycc, t1, t2, eris):
 
 
 class CCSD(ccsd.CCSD):
-    def __init__(self, mf, frozen=0, mo_coeff=None, mo_occ=None):
+    def __init__(self, mf, frozen=0, mo_coeff=None, mo_occ=None, cutoff=None):
         ccsd.CCSD.__init__(self, mf, frozen=0, mo_coeff=None, mo_occ=None)
         self.diis = None
+        self.cutoff = cutoff
 
     update_amps = update_amps
 
     def ao2mo(self, mo_coeff=None):
-        return _make_eris(self, mo_coeff)
+        return _make_eris(self, mo_coeff, self.cutoff)
 
     def init_amps(self, eris):
         time0 = time.clock(), time.time()
@@ -231,7 +233,8 @@ def _make_ao_ints(mol, mo_coeff, nocc):
     ppoo = ctf.tensor((nao,nao,nocc,nocc), sym=[SY,NS,NS,NS], dtype='d')
     ppov = ctf.tensor((nao,nao,nocc,nvir), sym=[SY,NS,NS,NS], dtype='d')
     ppvv = ctf.tensor((nao,nao,nvir,nvir), sym=[SY,NS,SY,NS], dtype='d')
-    print 'ao ints init', rank, lib.current_memory(), 'nao', nao
+    if (ctf.comm().rank() == 0):
+        print 'ao ints init', rank, lib.current_memory(), 'nao', nao
     intor = mol._add_suffix('int2e')
     ao2mopt = _ao2mo.AO2MOpt(mol, intor, 'CVHFnr_schwarz_cond',
                              'CVHFsetnr_direct_scf')
@@ -249,7 +252,8 @@ def _make_ao_ints(mol, mo_coeff, nocc):
 
     subtasks = list(static_partition(tasks))
     ntasks = max(comm.allgather(len(subtasks)))
-    print 'ao ints', rank, lib.current_memory(), 'nao', nao, 'ntasks', len(subtasks)
+    if (ctf.comm().rank() == 0):
+        print 'ao ints', rank, lib.current_memory(), 'nao', nao, 'ntasks', len(subtasks)
     for itask in range(ntasks):
         if itask >= len(subtasks):
             ppoo.write([], [])
@@ -277,7 +281,8 @@ def _make_ao_ints(mol, mo_coeff, nocc):
             eri = _ao2mo.nr_e2(eri, mo, (0,nmo,0,nmo), 's4', 's1')
             idx = sqidx[i0:i1,j0:j1][numpy.tril_indices(i1-i0)]
 
-        print 'ao ints memory before ctf write', rank, itask, lib.current_memory()
+        if (ctf.comm().rank() == 0):
+            print 'ao ints memory before ctf write', rank, itask, lib.current_memory()
         ooidx = idx[:,None] * nocc**2 + numpy.arange(nocc**2)
         ovidx = idx[:,None] * (nocc*nvir) + numpy.arange(nocc*nvir)
         vvidx = idx[:,None] * nvir**2 + vtrilidx
@@ -286,10 +291,11 @@ def _make_ao_ints(mol, mo_coeff, nocc):
         ppov.write(ovidx.ravel(), eri[:,:nocc,nocc:].ravel())
         ppvv.write(vvidx.ravel(), lib.pack_tril(eri[:,nocc:,nocc:]).ravel())
         idx = eri = None
-    print 'ao_ints Done'
+    if (ctf.comm().rank() == 0):
+        print 'ao_ints Done'
     return ppoo, ppov, ppvv
 
-def _make_eris(mycc, mo_coeff=None):
+def _make_eris(mycc, mo_coeff=None, cutoff=None):
     mol = mycc.mol
     NS = ctf.SYM.NS
     SY = ctf.SYM.SY
@@ -322,16 +328,19 @@ def _make_eris(mycc, mo_coeff=None):
     orbo = mo[:,:nocc]
     orbv = mo[:,nocc:]
 
-    print 'before contraction', rank, lib.current_memory()
+    if (ctf.comm().rank() == 0):
+        print 'before contraction', rank, lib.current_memory()
     tmp = ctf.tensor([nao,nocc,nvir,nvir], sym=[NS,NS,SY,NS])
     otmp = ctf.einsum('pqrs,qj->pjrs', ppvv, orbo, out=tmp)
     eris.oovv = ctf.tensor([nocc,nocc,nvir,nvir], sym=[NS,NS,SY,NS])
     eris.ovvv = ctf.einsum('pjrs,pi->ijrs', otmp, orbo, out=eris.oovv)
     otmp = tmp = None
 
-    print '___________  vvvv', rank, lib.current_memory()
+    if (ctf.comm().rank() == 0):
+        print '___________  vvvv', rank, lib.current_memory()
     tmp = ctf.tensor([nao,nvir,nvir,nvir], sym=[NS,NS,SY,NS])
-    print '___________  vvvv sub1', rank, lib.current_memory()
+    if (ctf.comm().rank() == 0):
+        print '___________  vvvv sub1', rank, lib.current_memory()
     vtmp = ctf.einsum('pqrs,qj->pjrs', ppvv, orbv, out=tmp)
 
     eris.ovvv = ctf.tensor([nocc,nvir,nvir,nvir], sym=[NS,NS,SY,NS])
@@ -339,7 +348,8 @@ def _make_eris(mycc, mo_coeff=None):
     ppvv = None
 
     tmp = ctf.tensor([nvir,nvir,nvir,nvir], sym=[NS,NS,SY,NS])
-    print '___________  vvvv sub2', rank, lib.current_memory()
+    if (ctf.comm().rank() == 0):
+        print '___________  vvvv sub2', rank, lib.current_memory()
     vtmp = ctf.einsum('pjrs,pi->ijrs', vtmp, orbv, out=tmp)
     eris.vvvv = ctf.tensor(sym=[SY,NS,SY,NS], copy=vtmp)
     vtmp = tmp = None
@@ -356,8 +366,20 @@ def _make_eris(mycc, mo_coeff=None):
     eris.oooo = ctf.einsum('pjrs,pi->ijrs', otmp, orbo)
     ppoo = otmp = None
 
-
-    print '___________  fock', rank, lib.current_memory()
+    if cutoff != None:
+        print("Using cutoff",cutoff)
+        eris.ovvv = eris.ovvv.sparsify(ctf.vecnorm(eris.ovvv)*cutoff)
+        eris.oovv = eris.oovv.sparsify(ctf.vecnorm(eris.oovv)*cutoff)
+        eris.oooo = eris.oooo.sparsify(ctf.vecnorm(eris.oooo)*cutoff)
+        eris.ooov = eris.ooov.sparsify(ctf.vecnorm(eris.ooov)*cutoff)
+        eris.vvvv = eris.vvvv.sparsify(ctf.vecnorm(eris.vvvv)*cutoff)
+        eris.ovov = eris.ovov.sparsify(ctf.vecnorm(eris.ovov)*cutoff)
+        if (ctf.comm().rank() == 0):
+            for e in [eris.ovvv, eris.oovv, eris.oooo, eris.ooov, eris.vvvv, eris.ovov]:
+                print "For integral tensor with shape,", e.shape,"symmetry",e.sym,"number of nonzeros with cutoff", cutoff, "is ", (int(100000*e.nnz_tot/e.size))/1000, "%"
+            
+    if (ctf.comm().rank() == 0):
+        print '___________  fock', rank, lib.current_memory()
     eris.mo_energy = eris.fock.diagonal()
     eris.foo = eris.fock[:nocc,:nocc].copy()
     eris.foo.i('ii') << (eris.mo_energy[:nocc]*-1).i('i')
@@ -377,83 +399,87 @@ if __name__ == '__main__':
         [8 , (0. , 0.     , 0.)],
         [1 , (0. , -0.757 , 0.587)],
         [1 , (0. , 0.757  , 0.587)]]
-    mol.basis = 'aug-ccpvqz'
+    #mol.basis = 'aug-ccpvqz'
+    mol.basis = 'aug-ccpvdz'
     mol.build()
     mol.verbose = 4
     mol.max_memory = 1
     mf = scf.RHF(mol)
     #mf.chkfile = 'h2o-aqz.chk'
-    #mf.run() #.density_fit().run()
-    mf.__dict__.update(scf.chkfile.load('h2o-aqz.chk', 'scf'))
-    CCSD(mf).run()
-    exit()
+    mf.run() #.density_fit().run()
+    #mf.__dict__.update(scf.chkfile.load('h2o-aqz.chk', 'scf'))
+    cutoff = None
+    if (len(sys.argv) > 1):
+        cutoff = float(sys.argv[1])
+    CCSD(mf,cutoff=cutoff).run()
+    #exit()
 
-    nocc, nvir = 5, mol.nao_nr() - 5
-    nmo = nocc + nvir
-    nmo_pair = nmo*(nmo+1)//2
-    numpy.random.seed(12)
-    mf._eri = numpy.random.random(nmo_pair*(nmo_pair+1)//2)
-    mf.mo_coeff = numpy.random.random((nmo,nmo))
-    mf.mo_energy = numpy.arange(0., nmo)
-    mf.mo_occ = numpy.zeros(nmo)
-    mf.mo_occ[:nocc] = 2
-    vhf = mf.get_veff(mol, mf.make_rdm1())
-    cinv = numpy.linalg.inv(mf.mo_coeff)
-    mf.get_hcore = lambda *args: (reduce(numpy.dot, (cinv.T*mf.mo_energy, cinv)) - vhf)
-    mycc = CCSD(mf)
-    if 0:
-        print(abs(ao2mo.restore(1, mol.intor('int2e_sph'), mol.nao_nr()) -
-                  _make_ao_ints(mol).to_nparray()).max())
-    eris = mycc.ao2mo()
+    #nocc, nvir = 5, mol.nao_nr() - 5
+    #nmo = nocc + nvir
+    #nmo_pair = nmo*(nmo+1)//2
+    #numpy.random.seed(12)
+    #mf._eri = numpy.random.random(nmo_pair*(nmo_pair+1)//2)
+    #mf.mo_coeff = numpy.random.random((nmo,nmo))
+    #mf.mo_energy = numpy.arange(0., nmo)
+    #mf.mo_occ = numpy.zeros(nmo)
+    #mf.mo_occ[:nocc] = 2
+    #vhf = mf.get_veff(mol, mf.make_rdm1())
+    #cinv = numpy.linalg.inv(mf.mo_coeff)
+    #mf.get_hcore = lambda *args: (reduce(numpy.dot, (cinv.T*mf.mo_energy, cinv)) - vhf)
+    #mycc = CCSD(mf,cutoff=cutoff)
+    #if 0:
+    #    print(abs(ao2mo.restore(1, mol.intor('int2e_sph'), mol.nao_nr()) -
+    #              _make_ao_ints(mol).to_nparray()).max())
+    #eris = mycc.ao2mo(cutoff)
 
-    t1 = numpy.random.random((nocc,nvir)) * .1
-    t2 = numpy.random.random((nocc,nocc,nvir,nvir)) * .1
-    t2 = t2 + t2.transpose(1,0,3,2)
+    #t1 = numpy.random.random((nocc,nvir)) * .1
+    #t2 = numpy.random.random((nocc,nocc,nvir,nvir)) * .1
+    #t2 = t2 + t2.transpose(1,0,3,2)
 
-    emp2, t1a, t2a = mycc.init_amps(eris)
-    t1a = t1a.to_nparray()
-    t2a = t2a.to_nparray()
-    if rank == 0:
-        print(emp2 - -5817752.3455295097)
-        print(lib.finger(t1a) - -0.1436792653009763)
-        print(lib.finger(t2a) - -47.895887814531207)
+    #emp2, t1a, t2a = mycc.init_amps(eris)
+    #t1a = t1a.to_nparray()
+    #t2a = t2a.to_nparray()
+    #if rank == 0:
+    #    print(emp2 - -5817752.3455295097)
+    #    print(lib.finger(t1a) - -0.1436792653009763)
+    #    print(lib.finger(t2a) - -47.895887814531207)
 
-    t1a, t2a = update_amps(mycc, ctf.astensor(t1), ctf.astensor(t2), eris)
-    e = mycc.energy(t1a, t2a, eris)
-    t1a = t1a.to_nparray()
-    t2a = t2a.to_nparray()
-    if rank == 0:
-        print(lib.finger(t1a) - -14862.627009452939)
-        print(lib.finger(t2a) - 6355.2161046378124 )
-        print(e*1e-8 - 11157.900866549678)
-    exit()
+    #t1a, t2a = update_amps(mycc, ctf.astensor(t1), ctf.astensor(t2), eris)
+    #e = mycc.energy(t1a, t2a, eris)
+    #t1a = t1a.to_nparray()
+    #t2a = t2a.to_nparray()
+    #if rank == 0:
+    #    print(lib.finger(t1a) - -14862.627009452939)
+    #    print(lib.finger(t2a) - 6355.2161046378124 )
+    #    print(e*1e-8 - 11157.900866549678)
+    #exit()
 
-    eris.naux = 200
-    vvL = numpy.random.random((nvir*(nvir+1)//2,eris.naux))
-    eris.vvL = ctf.astensor(lib.unpack_tril(vvL,axis=0))
-    eris.ovL = ctf.astensor(numpy.random.random((nocc,nvir,eris.naux)))
+    #eris.naux = 200
+    #vvL = numpy.random.random((nvir*(nvir+1)//2,eris.naux))
+    #eris.vvL = ctf.astensor(lib.unpack_tril(vvL,axis=0))
+    #eris.ovL = ctf.astensor(numpy.random.random((nocc,nvir,eris.naux)))
 
-    t1a, t2a = update_amps(mycc, ctf.astensor(t1), ctf.astensor(t2), eris)
-    t1a = t1a.to_nparray()
-    t2a = t2a.to_nparray()
-    if rank == 0:
-        print(lib.finger(t1a) - -1909.8213601597431)
-        print(lib.finger(t2a) - 7246.8212135621161 )
+    #t1a, t2a = update_amps(mycc, ctf.astensor(t1), ctf.astensor(t2), eris)
+    #t1a = t1a.to_nparray()
+    #t2a = t2a.to_nparray()
+    #if rank == 0:
+    #    print(lib.finger(t1a) - -1909.8213601597431)
+    #    print(lib.finger(t2a) - 7246.8212135621161 )
 
-    mol = gto.Mole()
-    mol.atom = [
-        [8 , (0. , 0.     , 0.)],
-        [1 , (0. , -0.757 , 0.587)],
-        [1 , (0. , 0.757  , 0.587)]]
-    mol.basis = 'mycc-pvqz'
-    mol.build()
-    mf = scf.RHF(mol).density_fit().run()
+    #mol = gto.Mole()
+    #mol.atom = [
+    #    [8 , (0. , 0.     , 0.)],
+    #    [1 , (0. , -0.757 , 0.587)],
+    #    [1 , (0. , 0.757  , 0.587)]]
+    #mol.basis = 'mycc-pvqz'
+    #mol.build()
+    #mf = scf.RHF(mol).density_fit().run()
 
-    mycc = CCSD(mf)
-    mycc.max_cycle = 2
-    mycc.verbose = 4
-    mycc.run()
-    print(mycc.e_corr - -0.28122723906352487)
+    #mycc = CCSD(mf)
+    #mycc.max_cycle = 2
+    #mycc.verbose = 4
+    #mycc.run()
+    #print(mycc.e_corr - -0.28122723906352487)
 
 #    mycc = dfccsd.RCCSD(mf).run()
 #    print(mycc.e_corr - -0.28122723906352487)
