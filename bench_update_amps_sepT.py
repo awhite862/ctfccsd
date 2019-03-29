@@ -8,8 +8,10 @@ def update_amps(t1, t2, eris):
     nov = nocc*nvir
 
     t1new = ctf.tensor(t1.shape)
-    tau = t2 + ctf.einsum('ia,jb->ijab', t1, t1)
-    t2new = ctf.einsum('acbd,ijab->ijcd', eris.vvvv, tau)
+    #tau = t2 + ctf.einsum('ia,jb->ijab', t1, t1)
+    #t2new = ctf.einsum('acbd,ijab->ijcd', eris.vvvv, tau)
+    t2new = ctf.einsum('acbd,ijab->ijcd', eris.vvvv, t2)
+    t2new += ctf.einsum('acbd,ia,jb->ijcd', eris.vvvv, t1, t1)
     t2new *= .5
 
     t1new += eris.fov
@@ -32,9 +34,10 @@ def update_amps(t1, t2, eris):
     #:eris_ovvv = ctf.einsum('ial,bcl->iabc', ovL, vvL)
     #:tmp = ctf.einsum('ijcd,kcdb->kijb', tau, eris_ovvv)
     #:t2new += ctf.einsum('ka,kijb->jiba', -t1, tmp)
-    tmp = ctf.einsum('ijcd,kcdb->kijb', tau, eris.ovvv)
+    #tmp = ctf.einsum('ijcd,kcdb->kijb', tau, eris.ovvv)
+    tmp = ctf.einsum('ijcd,kcdb->kijb', t2, eris.ovvv)
+    tmp += ctf.einsum('ic,jd,kcdb->kijb', t1, t1, eris.ovvv)
     t2new -= ctf.einsum('ka,kijb->jiba', t1, tmp)
-    tau = tmp = None
 
     wOVov  = ctf.einsum('ikjb,ka->ijba', eris.ooov, -1*t1)
     wOVov += ctf.einsum('jc,iabc->jiab', t1, eris.ovvv)
@@ -56,9 +59,11 @@ def update_amps(t1, t2, eris):
     wOVov += eris.ovov.transpose(0,2,3,1)
     wOVov -= .5 * ctf.einsum('icka,jkbc->jiab', eris.ovov, t2)
     tau = t2.transpose(0,2,1,3) * 2 - t2.transpose(0,3,1,2)
-    tau -= ctf.einsum('ia,jb->ibja', t1*2, t1)
-    wOVov += .5 * ctf.einsum('iakc,jbkc->jiab', eris.ovov, tau)
+    #tau -= ctf.einsum('ia,jb->ibja', t1*2, t1)
+    #wOVov += .5 * ctf.einsum('iakc,jbkc->jiab', eris.ovov, tau)
 
+    wOVov += .5 * ctf.einsum('iakc,jc,kb->jiab', eris.ovov, t1*2, t1)
+    wOVov += .5 * ctf.einsum('iakc,jbkc->jiab', eris.ovov, tau)
     theta = t2 * 2 - t2.transpose(0,1,3,2)
     t2new += ctf.einsum('ikac,jkcb->jiba', theta, wOVov)
     tau = theta = wOVov = None
@@ -80,11 +85,17 @@ def update_amps(t1, t2, eris):
 
     woVoV -= eris.oovv
 
-    tau = t2 + ctf.einsum('ia,jb->ijab', t1, t1)
-    woooo += ctf.einsum('iajb,klab->ikjl', eris.ovov, tau)
-    t2new += .5 * ctf.einsum('kilj,klab->ijab', woooo, tau)
-    tau -= t2 * .5
-    woVoV += ctf.einsum('jkca,ickb->ijba', tau, eris.ovov)
+    #tau = t2 + ctf.einsum('ia,jb->ijab', t1, t1)
+    #woooo += ctf.einsum('iajb,klab->ikjl', eris.ovov, tau)
+    #t2new += .5 * ctf.einsum('kilj,klab->ijab', woooo, tau)
+    #tau -= t2 * .5
+    woooo += ctf.einsum('iajb,klab->ikjl', eris.ovov, t2)
+    woooo += ctf.einsum('iajb,ka,lb->ikjl', eris.ovov, t1, t1)
+    t2new += .5 * ctf.einsum('kilj,klab->ijab', woooo, t2)
+    t2new += .5 * ctf.einsum('kilj,ka,lb->ijab', woooo, t1, t1)
+    #tau -= t2 * .5
+    woVoV += ctf.einsum('jkca,ickb->ijba', .5*t2, eris.ovov)
+    woVoV += ctf.einsum('jc,ka,ickb->ijba', t1, t1, eris.ovov)
     t2new += ctf.einsum('kicb,kjac->ijab', woVoV, t2)
     t2new += ctf.einsum('kica,kjcb->ijab', woVoV, t2)
     woooo = tau = woVoV = None
@@ -129,7 +140,6 @@ if __name__ == '__main__':
     if (len(sys.argv)>3):
         cutoff = float(sys.argv[3])
 
-    cm = ctf.comm()
     eris = integrals()
     NS = ctf.SYM.NS
     SY = ctf.SYM.SY
@@ -147,6 +157,7 @@ if __name__ == '__main__':
         e.fill_random(0.,1.)
 
     if cutoff != None:
+        print("Using cutoff",cutoff)
         eris.ovvv = eris.ovvv.sparsify(cutoff)
         eris.oovv = eris.oovv.sparsify(cutoff)
         eris.oooo = eris.oooo.sparsify(cutoff)
@@ -155,10 +166,15 @@ if __name__ == '__main__':
         eris.ovov = eris.ovov.sparsify(cutoff)
         if (ctf.comm().rank() == 0):
             for e in [eris.ovvv, eris.oovv, eris.oooo, eris.ooov, eris.vvvv, eris.ovov]:
-                print "For integral tensor with shape", e.shape,"symmetry",e.sym,"number of nonzeros with cutoff", cutoff, "is ", (int(100000*e.nnz_tot/e.size))/1000, "%"
+                print "For integral tensor with shape", e.shape,"symmetry",e.sym,"number of nonzeros with cutoff", cutoff, "is ", (int(10000000*e.nnz_tot/e.size))/100000., "%"
           
     t1 = ctf.zeros([nocc,nvir])
     t2 = ctf.zeros([nocc,nocc,nvir,nvir])
+    t2.fill_random(0.,1.)
+    if (cutoff != None):
+        t2 = t2.sparsify(1-(1-cutoff)*10)
+        if (ctf.comm().rank() == 0):
+            print "For amplitude tensor with shape", t2.shape,"symmetry",t2.sym,"number of nonzeros with cutoff", 1-(1-cutoff)*10, "is ", (int(10000000*t2.nnz_tot/t2.size))/100000., "%"
 
     start = time.time()
     [t1new, t2new] = update_amps(t1,t2,eris)
