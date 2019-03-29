@@ -161,7 +161,6 @@ if __name__ == '__main__':
         e.fill_random(0.,1.)
 
     if cutoff != None:
-        print("Using cutoff",cutoff)
         eris.ovvv = eris.ovvv.sparsify(cutoff)
         eris.oovv = eris.oovv.sparsify(cutoff)
         eris.oooo = eris.oooo.sparsify(cutoff)
