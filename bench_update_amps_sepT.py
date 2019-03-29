@@ -8,25 +8,26 @@ def update_amps(t1, t2, eris):
     nov = nocc*nvir
 
     t1new = ctf.tensor(t1.shape)
+    t2new = ctf.tensor(t2.shape)
     #tau = t2 + ctf.einsum('ia,jb->ijab', t1, t1)
     #t2new = ctf.einsum('acbd,ijab->ijcd', eris.vvvv, tau)
-    t2new = ctf.einsum('acbd,ijab->ijcd', eris.vvvv, t2)
-    t2new += ctf.einsum('acbd,ia,jb->ijcd', eris.vvvv, t1, t1)
+    ctf.einsum('acbd,ijab->ijcd', eris.vvvv, t2, out=t2new)
+    ctf.einsum('acbd,ia,jb->ijcd', eris.vvvv, t1, t1, out=t2new)
     t2new *= .5
 
     t1new += eris.fov
     foo = eris.foo + .5 * ctf.einsum('ia,ja->ij', eris.fov, t1)
     fvv = eris.fvv - .5 * ctf.einsum('ia,ib->ab', t1, eris.fov)
 
-    foo += ctf.einsum('kc,jikc->ij',  2*t1, eris.ooov)
-    foo += ctf.einsum('kc,jkic->ij', -1*t1, eris.ooov)
+    ctf.einsum('kc,jikc->ij',  2*t1, eris.ooov, out=foo)
+    ctf.einsum('kc,jkic->ij', -1*t1, eris.ooov, out=foo)
     woooo = ctf.einsum('ijka,la->ijkl', eris.ooov, t1)
     woooo = woooo + woooo.transpose(2,3,0,1)
     woooo += eris.oooo
 
     #for p0, p1 in lib.prange(0, nvir, vblk):
-    fvv += ctf.einsum('kc,kcba->ab',  2*t1, eris.ovvv)
-    fvv += ctf.einsum('kc,kbca->ab', -1*t1, eris.ovvv)
+    ctf.einsum('kc,kcba->ab',  2*t1, eris.ovvv, out=fvv)
+    ctf.einsum('kc,kbca->ab', -1*t1, eris.ovvv, out=fvv)
 
     woVoV = ctf.einsum('ijka,kb->ijab', eris.ooov, t1)
     woVoV -= ctf.einsum('jc,icab->ijab', t1, eris.ovvv)
@@ -35,25 +36,26 @@ def update_amps(t1, t2, eris):
     #:tmp = ctf.einsum('ijcd,kcdb->kijb', tau, eris_ovvv)
     #:t2new += ctf.einsum('ka,kijb->jiba', -t1, tmp)
     #tmp = ctf.einsum('ijcd,kcdb->kijb', tau, eris.ovvv)
-    tmp = ctf.einsum('ijcd,kcdb->kijb', t2, eris.ovvv)
-    tmp += ctf.einsum('ic,jd,kcdb->kijb', t1, t1, eris.ovvv)
+    tmp = ctf.tensor([nocc,nocc,nocc,nvir])
+    ctf.einsum('ic,jd,kcdb->kijb', t1, t1, eris.ovvv, out=tmp)
+    ctf.einsum('ijcd,kcdb->kijb', t2, eris.ovvv,out=tmp)
     t2new -= ctf.einsum('ka,kijb->jiba', t1, tmp)
 
     wOVov  = ctf.einsum('ikjb,ka->ijba', eris.ooov, -1*t1)
-    wOVov += ctf.einsum('jc,iabc->jiab', t1, eris.ovvv)
+    ctf.einsum('jc,iabc->jiab', t1, eris.ovvv, out=wOVov)
     t2new += wOVov.transpose(0,1,3,2)
 
     theta = t2.transpose(0,1,3,2) * 2
     theta -= t2
-    t1new += ctf.einsum('ijcb,jcba->ia', theta, eris.ovvv)
+    ctf.einsum('ijcb,jcba->ia', theta, eris.ovvv, out=t1new)
 
     t2new += eris.ovov.transpose(0,2,1,3) * .5
 
     fov = eris.fov.copy()
-    fov += ctf.einsum('kc,iakc->ia', t1, eris.ovov) * 2
+    ctf.einsum('kc,iakc->ia', t1, eris.ovov, out=fov) * 2
     fov -= ctf.einsum('kc,icka->ia', t1, eris.ovov)
 
-    t1new += ctf.einsum('jb,jiab->ia', fov, theta)
+    ctf.einsum('jb,jiab->ia', fov, theta, out=t1new)
     t1new -= ctf.einsum('kijb,kjba->ia', eris.ooov, theta)
     theta = None
 
@@ -63,16 +65,16 @@ def update_amps(t1, t2, eris):
     #tau -= ctf.einsum('ia,jb->ibja', t1*2, t1)
     #wOVov += .5 * ctf.einsum('iakc,jbkc->jiab', eris.ovov, tau)
 
-    wOVov += .5 * ctf.einsum('iakc,jc,kb->jiab', eris.ovov, t1*2, t1)
-    wOVov += .5 * ctf.einsum('iakc,jbkc->jiab', eris.ovov, tau)
+    ctf.einsum('iakc,jc,kb->jiab', eris.ovov, t1, t1, out=wOVov)
+    ctf.einsum('iakc,jbkc->jiab', eris.ovov, .5*tau, out=wOVov)
     theta = t2 * 2 - t2.transpose(0,1,3,2)
-    t2new += ctf.einsum('ikac,jkcb->jiba', theta, wOVov)
+    ctf.einsum('ikac,jkcb->jiba', theta, wOVov, out=t2new)
     tau = theta = wOVov = None
 
     tau = ctf.einsum('ia,jb->ijab', t1*.5, t1) + t2
     theta = tau.transpose(0,1,3,2)*2 - tau
     fvv -= ctf.einsum('ijca,ibjc->ab', theta, eris.ovov)
-    foo += ctf.einsum('iakb,jkba->ij', eris.ovov, theta)
+    ctf.einsum('iakb,jkba->ij', eris.ovov, theta, out=foo)
     tau = theta = None
 
     tmp = ctf.einsum('ic,jkbc->jibk', t1, eris.oovv)
@@ -81,8 +83,8 @@ def update_amps(t1, t2, eris):
     t2new -= ctf.einsum('ka,jibk->jiba', t1, tmp)
     tmp = None
 
-    t1new += ctf.einsum('jb,iajb->ia',  2*t1, eris.ovov)
-    t1new += ctf.einsum('jb,ijba->ia', -1*t1, eris.oovv)
+    ctf.einsum('jb,iajb->ia',  2*t1, eris.ovov, out=t1new)
+    ctf.einsum('jb,ijba->ia', -1*t1, eris.oovv, out=t1new)
 
     woVoV -= eris.oovv
 
@@ -90,27 +92,27 @@ def update_amps(t1, t2, eris):
     #woooo += ctf.einsum('iajb,klab->ikjl', eris.ovov, tau)
     #t2new += .5 * ctf.einsum('kilj,klab->ijab', woooo, tau)
     #tau -= t2 * .5
-    woooo += ctf.einsum('iajb,klab->ikjl', eris.ovov, t2)
-    woooo += ctf.einsum('iajb,ka,lb->ikjl', eris.ovov, t1, t1)
-    t2new += .5 * ctf.einsum('kilj,klab->ijab', woooo, t2)
-    t2new += .5 * ctf.einsum('kilj,ka,lb->ijab', woooo, t1, t1)
+    ctf.einsum('iajb,klab->ikjl', eris.ovov, t2, out=woooo)
+    ctf.einsum('iajb,ka,lb->ikjl', eris.ovov, t1, t1, out=woooo)
+    ctf.einsum('kilj,klab->ijab', woooo, .5*t2, out=t2new)
+    ctf.einsum('kilj,ka,lb->ijab', woooo, .5*t1, t1, out=t2new)
     #tau -= t2 * .5
-    woVoV += ctf.einsum('jkca,ickb->ijba', .5*t2, eris.ovov)
-    woVoV += ctf.einsum('jc,ka,ickb->ijba', t1, t1, eris.ovov)
-    t2new += ctf.einsum('kicb,kjac->ijab', woVoV, t2)
-    t2new += ctf.einsum('kica,kjcb->ijab', woVoV, t2)
+    ctf.einsum('jkca,ickb->ijba', .5*t2, eris.ovov, out=woVoV)
+    ctf.einsum('jc,ka,ickb->ijba', t1, t1, eris.ovov, out=woVoV)
+    ctf.einsum('kicb,kjac->ijab', woVoV, t2, out=t2new)
+    ctf.einsum('kica,kjcb->ijab', woVoV, t2, out=t2new)
     woooo = tau = woVoV = None
 
     ft_ij = foo + ctf.einsum('ja,ia->ij', .5*t1, fov)
     ft_ab = fvv - ctf.einsum('ia,ib->ab', .5*t1, fov)
-    t2new += ctf.einsum('ijac,bc->ijab', t2, ft_ab)
+    ctf.einsum('ijac,bc->ijab', t2, ft_ab, out=t2new)
     t2new -= ctf.einsum('ki,kjab->ijab', ft_ij, t2)
 
     mo_e = ctf.tensor([t1.shape[0]+t1.shape[1]])
     ctf.random.seed(42)
     mo_e.fill_random(0.,1.)
     eia = mo_e[:nocc].reshape(nocc,1) - mo_e[nocc:].reshape(1,nvir)
-    t1new += ctf.einsum('ib,ab->ia', t1, fvv)
+    ctf.einsum('ib,ab->ia', t1, fvv, out=t1new)
     t1new -= ctf.einsum('ja,ji->ia', t1, foo)
     t1new /= eia
 
