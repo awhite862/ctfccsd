@@ -129,6 +129,7 @@ if __name__ == '__main__':
     if (len(sys.argv)>3):
         cutoff = float(sys.argv[3])
 
+    cm = ctf.comm()
     eris = integrals()
     NS = ctf.SYM.NS
     SY = ctf.SYM.SY
@@ -146,16 +147,15 @@ if __name__ == '__main__':
         e.fill_random(0.,1.)
 
     if cutoff != None:
-        print("Using cutoff",cutoff)
-        eris.ovvv = eris.ovvv.sparsify(ctf.vecnorm(eris.ovvv)*cutoff)
-        eris.oovv = eris.oovv.sparsify(ctf.vecnorm(eris.oovv)*cutoff)
-        eris.oooo = eris.oooo.sparsify(ctf.vecnorm(eris.oooo)*cutoff)
-        eris.ooov = eris.ooov.sparsify(ctf.vecnorm(eris.ooov)*cutoff)
-        eris.vvvv = eris.vvvv.sparsify(ctf.vecnorm(eris.vvvv)*cutoff)
-        eris.ovov = eris.ovov.sparsify(ctf.vecnorm(eris.ovov)*cutoff)
+        eris.ovvv = eris.ovvv.sparsify(cutoff)
+        eris.oovv = eris.oovv.sparsify(cutoff)
+        eris.oooo = eris.oooo.sparsify(cutoff)
+        eris.ooov = eris.ooov.sparsify(cutoff)
+        eris.vvvv = eris.vvvv.sparsify(cutoff)
+        eris.ovov = eris.ovov.sparsify(cutoff)
         if (ctf.comm().rank() == 0):
             for e in [eris.ovvv, eris.oovv, eris.oooo, eris.ooov, eris.vvvv, eris.ovov]:
-                print "For integral tensor with shape,", e.shape,"symmetry",e.sym,"number of nonzeros with cutoff", cutoff, "is ", (int(100000*e.nnz_tot/e.size))/1000, "%"
+                print "For integral tensor with shape,", e.shape,"symmetry",e.sym,"number of nonzeros with cutoff", cutoff, "is ", (int(10000000*e.nnz_tot/e.size))/100000., "%"
           
     t1 = ctf.zeros([nocc,nvir])
     t2 = ctf.zeros([nocc,nocc,nvir,nvir])
