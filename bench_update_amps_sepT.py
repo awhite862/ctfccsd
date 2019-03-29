@@ -43,7 +43,8 @@ def update_amps(t1, t2, eris):
     wOVov += ctf.einsum('jc,iabc->jiab', t1, eris.ovvv)
     t2new += wOVov.transpose(0,1,3,2)
 
-    theta = t2.transpose(0,1,3,2) * 2 - t2
+    theta = t2.transpose(0,1,3,2) * 2
+    theta -= t2
     t1new += ctf.einsum('ijcb,jcba->ia', theta, eris.ovvv)
 
     t2new += eris.ovov.transpose(0,2,1,3) * .5
@@ -140,6 +141,7 @@ if __name__ == '__main__':
     if (len(sys.argv)>3):
         cutoff = float(sys.argv[3])
 
+    cm = ctf.comm()
     eris = integrals()
     NS = ctf.SYM.NS
     SY = ctf.SYM.SY
