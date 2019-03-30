@@ -129,6 +129,7 @@ if __name__ == '__main__':
     if (len(sys.argv)>3):
         cutoff = float(sys.argv[3])
 
+    cm = ctf.comm()
     eris = integrals()
     NS = ctf.SYM.NS
     SY = ctf.SYM.SY
@@ -146,7 +147,6 @@ if __name__ == '__main__':
         e.fill_random(0.,1.)
 
     if cutoff != None:
-        print("Using cutoff",cutoff)
         eris.ovvv = eris.ovvv.sparsify(cutoff)
         eris.oovv = eris.oovv.sparsify(cutoff)
         eris.oooo = eris.oooo.sparsify(cutoff)
