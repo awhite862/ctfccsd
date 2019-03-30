@@ -6,6 +6,8 @@ for nodes in [1, 2, 4, 8, 16, 32, 64]:
     cores = nodes * 64
     no = int(50*nodes**(1./4.))
     nv = int(200*nodes**(1./4.))
+    nnz_frac = .005/(nv/200.)**2
+    zero_frac = 1.-nnz_frac
 
     script_file  = open("script_%s.sh" % nodes, "w")
 
@@ -42,8 +44,8 @@ for nodes in [1, 2, 4, 8, 16, 32, 64]:
     script_file.write("  do\n")
     script_file.write("    echo \"no $no nv $nv\"\n")
     script_file.write("    ibrun python ./bench_update_amps.py $no $nv\n")
-    script_file.write("    ibrun python ./bench_update_amps.py $no $nv .999\n")
-    script_file.write("    ibrun python ./bench_update_amps_sepT.py $no $nv .999\n")
+    script_file.write("    ibrun python ./bench_update_amps.py $no $nv %s\n" % zero_frac)
+    script_file.write("    ibrun python ./bench_update_amps_sepT.py $no $nv %s\n" % zero_frac)
     script_file.write("  done\n")
     script_file.write("done\n")
     
