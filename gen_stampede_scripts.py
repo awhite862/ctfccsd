@@ -46,5 +46,4 @@ for nodes in [1, 2, 4, 8, 16, 32, 64]:
     script_file.write("    ibrun python ./bench_update_amps_sepT.py $no $nv .999\n")
     script_file.write("  done\n")
     script_file.write("done\n")
-    script_file.write("EOF\n")
     
